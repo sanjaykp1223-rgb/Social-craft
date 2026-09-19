@@ -24,7 +24,7 @@ HF_TOKEN = os.getenv("HF_TOKEN", "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")
 
 # 🔴 जरूरी बदलाव: यहाँ "nyijun/Video-to-Anime" की जगह अपने Hugging Face Space का सही नाम डालें
 # उदाहरण के लिए अगर आप किसी एनीमेशन मॉडल का उपयोग कर रहे हैं तो उसका 'username/space-name' यहाँ आएगा।
-HF_SPACE_NAME = "nyijun/Video-to-Anime" 
+HF_SPACE_NAME = "SpiderReddy/Video-to-Anime" 
 
 @app.get("/")
 def home():
