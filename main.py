@@ -2,6 +2,7 @@ import os
 import requests
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from gradio_client import Client  # नया क्लाइंट इम्पोर्ट किया
 
 app = FastAPI(
     title="Social-craft AI Video Converter",
@@ -9,71 +10,60 @@ app = FastAPI(
     version="1.0"
 )
 
-# आपकी ब्लॉगर वेबसाइट या फ्रंटएंड को इस सर्वर से कनेक्ट करने की अनुमति देने के लिए CORS सेटिंग
+# CORS सेटिंग
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # सुरक्षा के लिए बाद में यहाँ अपनी ब्लॉगर वेबसाइट का लिंक डालें
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# सुरक्षा चेतावनी: टोकन को कोड के अंदर सीधे (Hardcode) न लिखें!
-# Render के 'Environment Variables' में जाकर HF_TOKEN नाम से अपनी टोकन वैल्यू सेट करें।
+# आपका Hugging Face टोकन
 HF_TOKEN = os.getenv("HF_TOKEN", "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")
 
-# Hugging Face का वीडियो-टू-एनिमे मॉडल API URL
-# नोट: Hugging Face से वीडियो प्रोसेस करने के लिए आपको सही मॉडल एंडपॉइंट URL की ज़रूरत होगी।
-HF_API_URL = "https://huggingface.co" 
+# 🔴 जरूरी बदलाव: यहाँ "nyijun/Video-to-Anime" की जगह अपने Hugging Face Space का सही नाम डालें
+# उदाहरण के लिए अगर आप किसी एनीमेशन मॉडल का उपयोग कर रहे हैं तो उसका 'username/space-name' यहाँ आएगा।
+HF_SPACE_NAME = "nyijun/Video-to-Anime" 
 
-# 1. होम रूट (Home Route - GET request)
-# अब मुख्य लिंक (https://onrender.com) खोलने पर एरर नहीं आएगा, बल्कि यह मैसेज दिखेगा।
 @app.get("/")
 def home():
     return {
         "status": "online",
-        "message": "Social-craft AI Video Converter Backend सफलतापूर्वक चल रहा है!",
-        "documentation": "डॉक्यूमेंटेशन देखने के लिए /docs या /redoc पर जाएं"
+        "message": "Social-craft AI Video Converter Backend सफलतापूर्वक चल रहा है!"
     }
 
-# 2. वीडियो कन्वर्ट करने का रूट (POST request)
 @app.post("/convert-video/")
 async def convert_video(file: UploadFile = File(...)):
-    # जांचें कि अपलोड की गई फ़ाइल वीडियो ही है
     if not file.content_type.startswith("video/"):
         raise HTTPException(status_code=400, detail="कृपया केवल वीडियो फ़ाइल अपलोड करें।")
     
+    # 1. वीडियो फाइल को टेम्परेरी लोकल सेव करना (Gradio Client के लिए जरूरी है)
+    input_path = f"temp_{file.filename}"
     try:
-        # वीडियो फ़ाइल को बाइट्स (Bytes) में पढ़ना
-        video_bytes = await file.read()
-        
-        # Hugging Face API के लिए हेडर्स
-        headers = {
-            "Authorization": f"Bearer {HF_TOKEN}"
-        }
-        
-        # Hugging Face AI मॉडल को वीडियो भेजना
+        with open(input_path, "wb") as f:
+            f.write(await file.read())
+            
         print("वीडियो Hugging Face सर्वर पर प्रोसेस हो रहा है...")
-        response = requests.post(HF_API_URL, headers=headers, data=video_bytes)
         
-        # अगर AI मॉडल अभी लोड हो रहा हो (Loading State)
-        if response.status_code == 503:
-            return {
-                "status": "loading",
-                "message": "AI मॉडल एक्टिवेट हो रहा है, कृपया 20-30 सेकंड बाद दोबारा कोशिश करें।",
-                "estimated_time": response.json().get("estimated_time", 20)
-            }
+        # 2. Gradio Client के जरिए सुरक्षित कनेक्शन बनाना
+        client = Client(HF_SPACE_NAME, hf_token=HF_TOKEN)
+        
+        # 3. AI मॉडल को वीडियो भेजना (नोट: '/predict' आपके मॉडल के अनुसार बदल सकता है)
+        result = client.predict(input_path, api_name="/predict")
+        
+        # प्रोसेस होने के बाद टेम्परेरी फाइल डिलीट करना
+        if os.path.exists(input_path):
+            os.remove(input_path)
             
-        # अगर कोई दूसरी गड़बड़ हो
-        if response.status_code != 200:
-            raise HTTPException(status_code=response.status_code, detail=f"AI सर्वर त्रुटि: {response.text}")
-            
-        # सफलतापूर्वक कनवर्टेड वीडियो मिलने पर
         return {
             "status": "success",
             "message": "वीडियो सफलतापूर्वक एनिमे में बदल दिया गया है!",
-            "contentType": response.headers.get("Content-Type", "video/mp4")
+            "converted_video_url": result  # यह आपको कनवर्टेड वीडियो का लिंक देगा
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"सर्वर एरर: {str(e)}")
+        # एरर आने पर भी टेम्परेरी फाइल डिलीट करना ताकि सर्वर की मेमोरी न भरे
+        if os.path.exists(input_path):
+            os.remove(input_path)
+        raise HTTPException(status_code=500, detail=f"AI सर्वर त्रुटि: {str(e)}")
